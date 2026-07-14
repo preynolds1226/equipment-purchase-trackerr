@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { Field, Message, TextInput } from "@/components/forms";
 import { EmptyState, LoadingState } from "@/components/ui-states";
-import { cleanOptionalText, formatCurrency, formatDateTime } from "@/lib/format";
+import { cleanOptionalText, formatDateTime } from "@/lib/format";
 import {
   getPriorityBadgeClass,
   getStatusBadgeClass,
@@ -30,7 +31,7 @@ const quickFilters: Array<{ label: string; status?: RequestStatus; priority?: Re
   { label: "Waiting on Vendor", status: "Waiting on Vendor" },
   { label: "Backordered", status: "Backordered" },
   { label: "Shipped", status: "Shipped" },
-  { label: "Received", status: "Received" },
+  { label: "Completed", status: "Received" },
   { label: "Emergency", priority: "Emergency" },
 ];
 
@@ -43,6 +44,7 @@ export function RequestsListClient() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [updatingRequestId, setUpdatingRequestId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
 
   const [search, setSearch] = useState(searchParams.get("q") ?? "");
@@ -276,6 +278,67 @@ export function RequestsListClient() {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
+  async function updateRequestStatus(request: RequestSearchRow, nextStatus: RequestStatus) {
+    if (!supabase) {
+      setMessage({ kind: "error", text: "Supabase environment variables are missing." });
+      return;
+    }
+
+    if (request.status === nextStatus) {
+      return;
+    }
+
+    setUpdatingRequestId(request.id);
+    setMessage(null);
+
+    const update: Database["public"]["Tables"]["requests"]["Update"] = {
+      status: nextStatus,
+    };
+
+    if (nextStatus === "Ordered" && !request.ordered_at) {
+      update.ordered_at = new Date().toISOString();
+    }
+
+    if (nextStatus === "Received" && !request.received_at) {
+      update.received_at = new Date().toISOString();
+    }
+
+    const { error } = await supabase.from("requests").update(update).eq("id", request.id);
+
+    if (error) {
+      setMessage({ kind: "error", text: error.message });
+      setUpdatingRequestId(null);
+      return;
+    }
+
+    const activityAction = `Changed status from ${request.status} to ${nextStatus}`;
+    await supabase.from("request_activity").insert({
+      request_id: request.id,
+      action: activityAction,
+      field_name: "status",
+      old_value: request.status,
+      new_value: nextStatus,
+    });
+
+    setRequests((current) =>
+      current.map((row) =>
+        row.id === request.id
+          ? {
+              ...row,
+              status: nextStatus,
+              ordered_at: update.ordered_at ?? row.ordered_at,
+              received_at: update.received_at ?? row.received_at,
+            }
+          : row,
+      ),
+    );
+    setMessage({
+      kind: "success",
+      text: `${request.request_number ?? "Request"} marked ${nextStatus === "Received" ? "complete" : nextStatus}.`,
+    });
+    setUpdatingRequestId(null);
+  }
+
   return (
     <div className="grid gap-5">
       {message ? <Message kind={message.kind}>{message.text}</Message> : null}
@@ -445,48 +508,49 @@ export function RequestsListClient() {
         <>
           <section className="grid gap-3 lg:hidden">
             {requests.map((request) => (
-              <RequestCard key={request.id} request={request} returnTo={returnTo} />
+              <RequestCard
+                key={request.id}
+                onStatusChange={updateRequestStatus}
+                request={request}
+                returnTo={returnTo}
+                updating={updatingRequestId === request.id}
+              />
             ))}
           </section>
 
-          <section className="hidden overflow-hidden rounded-lg border border-border bg-surface shadow-sm lg:block">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-surface-muted text-xs uppercase tracking-[0.12em] text-muted">
+          <section className="hidden max-h-[72vh] overflow-auto rounded-lg border border-border bg-surface shadow-sm lg:block">
+            <table className="w-full table-fixed text-left text-sm">
+              <colgroup>
+                <col className="w-[34%]" />
+                <col className="w-[13%]" />
+                <col className="w-[9%]" />
+                <col className="w-[15%]" />
+                <col className="w-[10%]" />
+                <col className="w-[9%]" />
+                <col className="w-[6%]" />
+                <col className="w-[4%]" />
+              </colgroup>
+              <thead className="sticky top-0 z-10 border-b border-border bg-surface-muted text-xs uppercase tracking-[0.12em] text-muted shadow-sm">
                 <tr>
-                  <th className="px-4 py-3">Request</th>
-                  <th className="px-4 py-3">Requested By</th>
+                  <th className="px-4 py-3">Item</th>
+                  <th className="px-3 py-3">Employee</th>
                   <th className="px-4 py-3">Equipment</th>
-                  <th className="px-4 py-3">Vendor</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Requested</th>
-                  <th className="px-4 py-3">ETA</th>
-                  <th className="px-4 py-3 text-right">Cost</th>
+                  <th className="px-3 py-3">Vendor</th>
+                  <th className="px-3 py-3">Status</th>
+                  <th className="px-3 py-3">Requested</th>
+                  <th className="px-3 py-3">ETA</th>
+                  <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {requests.map((request) => (
-                  <tr className="transition hover:bg-surface-muted" key={request.id}>
-                    <td className="px-4 py-3">
-                      <Link className="block" href={detailHref(request.id, returnTo)}>
-                        <span className="font-semibold text-accent">{request.request_number ?? "Request"}</span>
-                        <span className="mt-1 line-clamp-2 block max-w-sm text-foreground">{request.item_description}</span>
-                        <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeClass(request.priority)}`}>
-                          {request.priority}
-                        </span>
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-muted">{request.employee_name ?? "Unknown"}</td>
-                    <td className="px-4 py-3 text-muted">{request.equipment_number ?? "Not set"}</td>
-                    <td className="px-4 py-3 text-muted">{request.vendor_name ?? request.vendor_name_override ?? "Not set"}</td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusBadgeClass(request.status)}`}>
-                        {request.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-muted">{formatDateTime(request.requested_at)}</td>
-                    <td className="px-4 py-3 text-muted">{request.eta ?? "Not set"}</td>
-                    <td className="px-4 py-3 text-right text-muted">{formatCurrency(request.total_cost)}</td>
-                  </tr>
+                  <DesktopRequestRow
+                    key={request.id}
+                    onStatusChange={updateRequestStatus}
+                    request={request}
+                    returnTo={returnTo}
+                    updating={updatingRequestId === request.id}
+                  />
                 ))}
               </tbody>
             </table>
@@ -503,26 +567,167 @@ export function RequestsListClient() {
   );
 }
 
-function RequestCard({ request, returnTo }: { request: RequestSearchRow; returnTo: string }) {
+function DesktopRequestRow({
+  onStatusChange,
+  request,
+  returnTo,
+  updating,
+}: {
+  onStatusChange: (request: RequestSearchRow, status: RequestStatus) => void;
+  request: RequestSearchRow;
+  returnTo: string;
+  updating: boolean;
+}) {
+  const router = useRouter();
+  const href = detailHref(request.id, returnTo);
+  const vendorName = request.vendor_name ?? request.vendor_name_override;
+
+  function openRequest() {
+    router.push(href);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTableRowElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openRequest();
+    }
+  }
+
   return (
-    <Link className="rounded-lg border border-border bg-surface p-4 shadow-sm" href={detailHref(request.id, returnTo)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-accent">{request.request_number ?? "Request"}</span>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusBadgeClass(request.status)}`}>
+    <tr
+      className="cursor-pointer transition hover:bg-surface-muted focus:outline-none focus-visible:bg-surface-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+      onClick={openRequest}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+    >
+      <td className="px-4 py-3 align-top">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="shrink-0 font-semibold text-accent">{request.request_number ?? "Request"}</span>
+            <span className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold leading-none ${getPriorityBadgeClass(request.priority)}`}>
+              {request.priority}
+            </span>
+          </div>
+          <div className="line-clamp-2 max-w-[52rem] text-sm font-semibold leading-5 text-foreground">
+            {request.item_description}
+          </div>
+        </div>
+      </td>
+      <td className="px-3 py-3 align-top">
+        <div className="min-w-0">
+          <div className="truncate font-medium">{displayValue(request.employee_name)}</div>
+          <div className="truncate text-xs text-muted">{displayValue(request.employee_department)}</div>
+        </div>
+      </td>
+      <td className="px-4 py-3 align-top text-muted">
+        <span className="block truncate">{displayValue(request.equipment_number)}</span>
+      </td>
+      <td className="px-3 py-3 align-top text-muted">
+        <span className="block truncate" title={vendorName ?? undefined}>
+          {displayValue(vendorName)}
+        </span>
+      </td>
+      <td className="px-3 py-3 align-top">
+        <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold leading-none ${getStatusBadgeClass(request.status)}`}>
           {request.status}
         </span>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeClass(request.priority)}`}>
-          {request.priority}
-        </span>
+      </td>
+      <td className="px-3 py-3 align-top text-muted">
+        <span className="whitespace-nowrap">{formatCompactDateTime(request.requested_at)}</span>
+      </td>
+      <td className="px-3 py-3 align-top text-muted">
+        <span className="whitespace-nowrap">{formatCompactDate(request.eta)}</span>
+      </td>
+      <td className="px-3 py-2 align-top" onClick={(event) => event.stopPropagation()}>
+        <details className="relative">
+          <summary className="grid h-10 w-10 cursor-pointer list-none place-items-center rounded-md border border-border bg-background text-base font-bold text-muted outline-none transition hover:border-accent hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/30">
+            ⋯
+          </summary>
+          <div className="absolute right-0 z-20 mt-2 grid min-w-40 gap-1 rounded-md border border-border bg-surface p-1 shadow-lg">
+            <Link className={actionMenuItemClassName} href={href}>
+              Open
+            </Link>
+            <ActionMenuButton disabled={updating} label="Mark Ordered" onClick={() => onStatusChange(request, "Ordered")} />
+            <ActionMenuButton disabled={updating} label="Mark Shipped" onClick={() => onStatusChange(request, "Shipped")} />
+            <ActionMenuButton disabled={updating || request.status === "Received"} label="Complete" onClick={() => onStatusChange(request, "Received")} />
+          </div>
+        </details>
+      </td>
+    </tr>
+  );
+}
+
+function ActionMenuButton({
+  disabled,
+  label,
+  onClick,
+}: {
+  disabled: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={actionMenuItemClassName}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function RequestCard({
+  onStatusChange,
+  request,
+  returnTo,
+  updating,
+}: {
+  onStatusChange: (request: RequestSearchRow, status: RequestStatus) => void;
+  request: RequestSearchRow;
+  returnTo: string;
+  updating: boolean;
+}) {
+  const isComplete = request.status === "Received";
+
+  return (
+    <article className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <Link className="block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/30" href={detailHref(request.id, returnTo)}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-accent">{request.request_number ?? "Request"}</span>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusBadgeClass(request.status)}`}>
+            {request.status}
+          </span>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getPriorityBadgeClass(request.priority)}`}>
+            {request.priority}
+          </span>
+        </div>
+        <p className="mt-3 font-semibold leading-6">{request.item_description}</p>
+        <dl className="mt-3 grid gap-2 text-sm text-muted">
+          <InfoLine label="Requested by" value={request.employee_name ?? "Unknown"} />
+          <InfoLine label="Equipment" value={request.equipment_number ?? "Not set"} />
+          <InfoLine label="Vendor" value={request.vendor_name ?? request.vendor_name_override ?? "Not set"} />
+          <InfoLine label="Requested" value={formatDateTime(request.requested_at)} />
+        </dl>
+      </Link>
+      <div className="mt-4 flex gap-2">
+        <Link
+          className="grid min-h-11 flex-1 place-items-center rounded-md border border-border px-3 text-sm font-semibold"
+          href={detailHref(request.id, returnTo)}
+        >
+          Open
+        </Link>
+        <button
+          className="min-h-11 flex-1 rounded-md bg-accent px-3 text-sm font-semibold text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={updating || isComplete}
+          onClick={() => onStatusChange(request, "Received")}
+          type="button"
+        >
+          {isComplete ? "Completed" : updating ? "Completing..." : "Complete"}
+        </button>
       </div>
-      <p className="mt-3 font-semibold leading-6">{request.item_description}</p>
-      <dl className="mt-3 grid gap-2 text-sm text-muted">
-        <InfoLine label="Requested by" value={request.employee_name ?? "Unknown"} />
-        <InfoLine label="Equipment" value={request.equipment_number ?? "Not set"} />
-        <InfoLine label="Vendor" value={request.vendor_name ?? request.vendor_name_override ?? "Not set"} />
-        <InfoLine label="Requested" value={formatDateTime(request.requested_at)} />
-      </dl>
-    </Link>
+    </article>
   );
 }
 
@@ -573,6 +778,62 @@ function detailHref(id: string, returnTo: string) {
   return `/requests/${id}?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
+function displayValue(value: string | null | undefined) {
+  return value?.trim() ? value : <span className="text-muted/70">—</span>;
+}
+
+function formatCompactDateTime(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfValue = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayDifference = Math.round((startOfValue.getTime() - startOfToday.getTime()) / 86_400_000);
+  const time = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+
+  if (dayDifference === 0) {
+    return `Today, ${time}`;
+  }
+
+  if (dayDifference === -1) {
+    return `Yesterday, ${time}`;
+  }
+
+  const day = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+
+  return `${day}, ${time}`;
+}
+
+function formatCompactDate(value: string | null) {
+  if (!value) {
+    return <span className="text-muted/70">—</span>;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayDifference = Math.round((date.getTime() - startOfToday.getTime()) / 86_400_000);
+
+  if (dayDifference === 0) {
+    return "Today";
+  }
+
+  if (dayDifference === 1) {
+    return "Tomorrow";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+}
+
 function setQueryParam(params: URLSearchParams, key: string, value: string) {
   const cleaned = value.trim();
 
@@ -583,3 +844,6 @@ function setQueryParam(params: URLSearchParams, key: string, value: string) {
 
 const selectClassName =
   "h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20";
+
+const actionMenuItemClassName =
+  "flex min-h-10 w-full items-center rounded px-3 text-left text-sm font-semibold text-foreground outline-none hover:bg-surface-muted focus-visible:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50";
