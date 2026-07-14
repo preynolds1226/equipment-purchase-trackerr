@@ -334,7 +334,7 @@ export function RequestsListClient() {
     );
     setMessage({
       kind: "success",
-      text: `${request.request_number ?? "Request"} marked ${nextStatus === "Received" ? "complete" : nextStatus}.`,
+      text: `${request.request_number ?? "Request"} marked ${nextStatus === "Received" ? "closed" : nextStatus}.`,
     });
     setUpdatingRequestId(null);
   }
@@ -521,14 +521,14 @@ export function RequestsListClient() {
           <section className="hidden max-h-[72vh] overflow-auto rounded-lg border border-border bg-surface shadow-sm lg:block">
             <table className="w-full table-fixed text-left text-sm">
               <colgroup>
-                <col className="w-[34%]" />
+                <col className="w-[30%]" />
                 <col className="w-[13%]" />
                 <col className="w-[9%]" />
-                <col className="w-[15%]" />
-                <col className="w-[10%]" />
+                <col className="w-[13%]" />
                 <col className="w-[9%]" />
-                <col className="w-[6%]" />
-                <col className="w-[4%]" />
+                <col className="w-[9%]" />
+                <col className="w-[7%]" />
+                <col className="w-[10%]" />
               </colgroup>
               <thead className="sticky top-0 z-10 border-b border-border bg-surface-muted text-xs uppercase tracking-[0.12em] text-muted shadow-sm">
                 <tr>
@@ -639,6 +639,15 @@ function DesktopRequestRow({
         <span className="whitespace-nowrap">{formatCompactDate(request.eta)}</span>
       </td>
       <td className="px-3 py-2 align-top" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-end gap-2">
+          <button
+            className="min-h-10 whitespace-nowrap rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground outline-none transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-muted"
+            disabled={updating || request.status === "Received"}
+            onClick={() => onStatusChange(request, "Received")}
+            type="button"
+          >
+            {request.status === "Received" ? "Closed" : updating ? "Closing..." : "Close"}
+          </button>
         <details className="relative">
           <summary className="grid h-10 w-10 cursor-pointer list-none place-items-center rounded-md border border-border bg-background text-base font-bold text-muted outline-none transition hover:border-accent hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/30">
             ⋯
@@ -649,9 +658,10 @@ function DesktopRequestRow({
             </Link>
             <ActionMenuButton disabled={updating} label="Mark Ordered" onClick={() => onStatusChange(request, "Ordered")} />
             <ActionMenuButton disabled={updating} label="Mark Shipped" onClick={() => onStatusChange(request, "Shipped")} />
-            <ActionMenuButton disabled={updating || request.status === "Received"} label="Complete" onClick={() => onStatusChange(request, "Received")} />
+            <ActionMenuButton disabled={updating || request.status === "Received"} label="Close request" onClick={() => onStatusChange(request, "Received")} />
           </div>
         </details>
+        </div>
       </td>
     </tr>
   );
@@ -724,7 +734,7 @@ function RequestCard({
           onClick={() => onStatusChange(request, "Received")}
           type="button"
         >
-          {isComplete ? "Completed" : updating ? "Completing..." : "Complete"}
+          {isComplete ? "Closed" : updating ? "Closing..." : "Close request"}
         </button>
       </div>
     </article>
