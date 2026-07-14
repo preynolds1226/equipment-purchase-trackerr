@@ -518,7 +518,7 @@ export function RequestsListClient() {
             ))}
           </section>
 
-          <section className="hidden max-h-[72vh] overflow-auto rounded-lg border border-border bg-surface shadow-sm lg:block">
+          <section className="hidden rounded-lg border border-border bg-surface shadow-sm lg:block">
             <table className="w-full table-fixed text-left text-sm">
               <colgroup>
                 <col className="w-[30%]" />
