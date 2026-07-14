@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --background: #f6f3ee;
+  --foreground: #181818;
+  --surface: #fffdfa;
+  --surface-muted: #ece6dc;
+  --border: #d8d0c4;
+  --accent: #b9471b;
+  --accent-foreground: #fff7ed;
+  --muted: #686158;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #111312;
+    --foreground: #f5f2ed;
+    --surface: #1b1f1d;
+    --surface-muted: #272c29;
+    --border: #3a403c;
+    --accent: #f28b4b;
+    --accent-foreground: #271205;
+    --muted: #b6ada2;
+  }
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #111312;
+  --foreground: #f5f2ed;
+  --surface: #1b1f1d;
+  --surface-muted: #272c29;
+  --border: #3a403c;
+  --accent: #f28b4b;
+  --accent-foreground: #271205;
+  --muted: #b6ada2;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: "Courier New", Courier, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  text-decoration: none;
+}
